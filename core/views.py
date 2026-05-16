@@ -11,7 +11,9 @@ from django.contrib.auth.models import User
 import json
 from django.contrib.auth.forms import UserCreationForm
 from datetime import datetime
-
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from django.db.models import Sum
 
 @login_required
 def dashboard(request, username=None): # <-- Ahora acepta el parámetro opcional
@@ -118,7 +120,7 @@ def dashboard(request, username=None): # <-- Ahora acepta el parámetro opcional
         total_saisies=Count('registro'),
         produits=Sum('registro__montant', filter=Q(registro__tipo='Produit')),
         charges=Sum('registro__montant', filter=Q(registro__tipo='Charge'))
-    )
+    ).exclude(is_superuser=True)
     
     user_stats = []
     for u in users:
@@ -271,21 +273,47 @@ def carga_masiva_excel(request):
         return redirect('dashboard')
 
 def generate_excel_buffer(usuario_filter):
+    # MANDAMOS TU CONSULTA EXACTA (Sin tocarle una sola coma)
     if usuario_filter and usuario_filter != 'all':
         registros = Registro.objects.filter(Q(usuario__email=usuario_filter) | Q(usuario__username=usuario_filter)).order_by('-date')
     else:
         registros = Registro.objects.all().order_by('-date')
         
     data = []
+    total_produits = 0
+    total_charges = 0
+
+    # Recorremos tus registros, guardamos los datos y sumamos los totales para el balance
     for r in registros:
+        monto_float = float(r.montant)
+        
+        # Aprovechamos el bucle para ir sumando según el tipo
+        if r.tipo == 'Produit':
+            total_produits += monto_float
+        else:
+            total_charges += monto_float
+
         data.append({
-            'Date': r.date,
+            'Date': r.date.strftime('%d/%m/%Y') if r.date else '', # Formato limpio de fecha
             'Type (Produit ou Charge)': r.tipo,
             'Désignation': r.designation,
-            'Montant (MAD)': float(r.montant),
+            'Montant (MAD)': monto_float,
             'Utilisateur': r.usuario.email or r.usuario.username
         })
         
+    # === NUEVO: AÑADIMOS LAS FILAS DEL BALANCE AL FINAL DEL EXCEL ===
+    resultat_net = total_produits - total_charges
+
+    # Dejamos una fila vacía por estética
+    data.append({'Date': '', 'Type (Produit ou Charge)': '', 'Désignation': '', 'Montant (MAD)': '', 'Utilisateur': ''})
+    
+    # Añadimos las tres líneas de totales respetando tus columnas de Pandas
+    data.append({'Date': '', 'Type (Produit ou Charge)': '', 'Désignation': 'TOTAL PRODUITS (INGRESOS):', 'Montant (MAD)': total_produits, 'Utilisateur': ''})
+    data.append({'Date': '', 'Type (Produit ou Charge)': '', 'Désignation': 'TOTAL CHARGES (GASTOS):', 'Montant (MAD)': total_charges, 'Utilisateur': ''})
+    data.append({'Date': '', 'Type (Produit ou Charge)': '', 'Désignation': 'RESULTAT NET (BALANCE):', 'Montant (MAD)': resultat_net, 'Utilisateur': ''})
+    # ===============================================================
+        
+    # Tu lógica final con Pandas sigue intacta
     df = pd.DataFrame(data)
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
