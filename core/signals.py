@@ -14,6 +14,7 @@ LISTA_DISTRIBUCION_EMAILS = [
     'msb.coin@gmail.com',
     'msb.caixa@gmail.com',
     'vividrubys@gmail.com',
+    'assurance.mca@gmail.com',
     # ... añade el resto aquí hasta los 33 correos ...
 ]
 
